@@ -1,0 +1,470 @@
+---
+title: "Data_replication!"
+format: html
+Author: Hector!
+
+---
+
+Introduction
+Peripheral nerve injuries can severely impair motor function, and while nerve transfer surgery offers a promising path to recovery, predicting individual outcomes remains a significant clinical challenge. Zhu et al. developed the Fully Implantable Multisite Optogenetic Stimulation System (FIMOSS), a wireless, reprogrammable device designed for long-term evaluation of peripheral nerve plexus function at sub-nerve resolution. Using transgenic Thy1-ChR2-EYFP mice, the system delivered targeted optical stimulation to individual nerve fascicles and recorded both electrophysiological and motor responses. The authors then applied FIMOSS to a nerve transfer mouse model following traumatic brain injury, tracking innervation patterns across multiple muscles over 12 weeks post-surgery. Their findings demonstrate that FIMOSS can provide refined, longitudinal assessment of nerve function, with potential applications in personalized diagnosis and treatment planning following nerve injuries or surgeries.
+Data and Reanalyses
+The data used in this replication were obtained from the supplementary materials accompanying the original publication, which provided the raw numerical data underlying several of the paper's figures. Specifically, this report focuses on replicating analyses and visualizations from Figure 3, which characterizes the core technical performance of the FIMOSS implant in terms of thermal safety, optical output, and stimulation timing accuracy.
+The following four analyses are replicated in this report:
+
+Visualization (Fig. 3e) — A line plot with shaded SEM ribbons showing in vitro implant temperature over 7200s of continuous operation across four input voltages (3.3V, 3.6V, 3.9V, 4.2V), with n=3 replicates per voltage condition.
+Descriptive statistics (Fig. 3g) — A summary of mean ± SEM in vivo temperature across four implanted devices measured at five timepoints over 3600s of continuous operation at 3.3V, including temperature change from baseline per device.
+Inferential statistics (Fig. 3e) — A one-way ANOVA followed by post-hoc Tukey HSD testing to determine whether steady-state temperature (t > 200s) differed significantly across the four voltage conditions.
+Visualization (Fig. 3p) — A dual-axis plot showing stimulation temporal accuracy across six pulse width settings (10–200ms), with blue bars representing absolute time deviation in milliseconds and a red line representing relative time deviation as a percentage, both with error bars (n=4, mean ± SEM).
+
+```{r}
+library(tidyverse)
+library(readxl)
+
+# file
+data <- read_excel("/Users/hector/Desktop/tidy_data.xlsx")
+
+source_block <- read_excel("/Users/hector/Desktop/tidy_data.xlsx", sheet = "README")
+fig3_raw <- read_excel("/Users/hector/Desktop/tidy_data.xlsx", sheet = "Fig3_tidy")
+knitr::kable(head(fig3_raw))
+
+# take a look at structure
+head(data)
+glimpse(data)
+```
+
+
+Descriptive Statoistics: 3g
+```{r}
+library(readxl)
+library(tidyverse)
+
+# read data
+fig3g <- read_excel("/Users/hector/Desktop/data_replication_data.xlsx",
+                    sheet = "Fig.3",
+                    range = "A41:E46",
+                    col_names = TRUE)
+
+colnames(fig3g) <- c("time", "Device1", "Device2", "Device3", "Device4")
+
+# peek
+head(fig3g)
+
+# pivot to long
+fig3g_long <- fig3g |>
+  pivot_longer(-time, names_to = "device", values_to = "temp")
+
+# --- descriptive stats per timepoint (mean ± SEM across 4 devices) ---
+fig3g_summary <- fig3g_long |>
+  group_by(time) |>
+  summarise(
+    n       = n(),
+    mean    = mean(temp),
+    sd      = sd(temp),
+    sem     = sd / sqrt(n),
+    min     = min(temp),
+    max     = max(temp),
+    .groups = "drop"
+  )
+
+print(fig3g_summary)
+
+# --- temperature change from baseline per device ---
+fig3g_delta <- fig3g_long |>
+  group_by(device) |>
+  mutate(baseline  = temp[time == 0],
+         delta     = temp - baseline) |>
+  ungroup()
+
+delta_summary <- fig3g_delta |>
+  group_by(time) |>
+  summarise(
+    mean_delta = mean(delta),
+    sem_delta  = sd(delta) / sqrt(n()),
+    .groups    = "drop"
+  )
+
+print(delta_summary)
+
+# --- plot matching fig 3g: individual points + mean line ---
+ggplot() +
+  geom_point(data = fig3g_long,
+             aes(x = time, y = temp, color = device), size = 3) +
+  geom_line(data = fig3g_summary,
+            aes(x = time, y = mean), linetype = "dashed", linewidth = 0.8) +
+  geom_errorbar(data = fig3g_summary,
+                aes(x = time, ymin = mean - sem, ymax = mean + sem),
+                width = 100) +
+  labs(x     = "Time/s",
+       y     = "Maximum temperature/°C",
+       title = "In Vivo Implant Temperature Curve",
+       color = NULL)
+
+```
+
+####Across the four implanted devices, mean in vivo temperature remained stable and close to baseline throughout the 3600s recording period, ranging from 33.4°C (± 0.03 SEM) at t=0 to a peak of 34.4°C (± 0.39 SEM) at t=1800s, consistent with the modest temperature increases shown in Figure 3g of the original study.
+####Delta from baseline:
+####Mean temperature increase from baseline peaked at t=1800s and t=2700s with an average rise of 0.975°C (± 0.40 and ± 0.46 SEM respectively), and remained below 1°C across all timepoints, indicating that continuous FIMOSS operation at 3.3V produces only minimal subcutaneous heating in vivo, replicating the authors' conclusion that the implant operates within a safe thermal range.
+
+
+
+```{r}
+library(fmsb)
+
+# extract fig3n with skip to get right rows
+fig3n <- read_excel("/Users/hector/Desktop/tidy_data.xlsx",
+                    sheet = "Fig3_tidy",
+                    range = "A50:C57",
+                    col_names = c("sector", "single_LED", "two_LEDs")) %>%
+  mutate(
+    single_LED = as.numeric(single_LED),
+    two_LEDs = as.numeric(two_LEDs)
+  )
+
+# rebuild radar data
+radar_data <- as.data.frame(rbind(
+  rep(25, 8),
+  rep(0, 8),
+  fig3n$single_LED,
+  fig3n$two_LEDs
+))
+
+# fix sector labels and order to match original (starts at Sector3 at top)
+colnames(radar_data) <- c("Sector1", "Sector2", "Sector3", "Sector4", 
+                           "Sector5", "Sector6", "Sector7", "Sector8")
+
+# reorder columns so Sector3 is first (top of radar)
+radar_data <- radar_data[, c("Sector3", "Sector4", "Sector5", "Sector6",
+                              "Sector7", "Sector8", "Sector1", "Sector2")]
+
+radarchart(radar_data,
+           pcol = c("red", "orange"),          # border colors
+           pfcol = c(rgb(1,0,0,0.3),           # red fill w transparency
+                     rgb(1,0.85,0,0.3)),        # yellow fill w transparency
+           plwd = 2,
+           plty = c(2, 2),                      # dashed lines
+           cglcol = "grey",
+           cglty = 1,
+           axislabcol = "grey",
+           caxislabels = seq(0, 25, 5),
+           vlcex = 0.9,
+           title = "Nerve sector mean irradiance (mW/mm^2)")
+
+legend("topright",
+       legend = c("Single µLED", "Two µLEDs"),
+       col = c("red", "orange"),
+       lty = 2, lwd = 2,
+       fill = c(rgb(1,0,0,0.3), rgb(1,0.85,0,0.3)),
+       bty = "n")
+```
+
+
+
+
+```{r}
+library(tidyverse)
+library(fmsb)  # for radar charts
+
+# --- Data ---
+fig3n <- tibble(
+  Sector = paste0("Sector", c(3,4,5,6,7,8,1,2)),  # rotated so Sector3 is at top
+  Single_LED = c(21.92, 14.32, 6.619, 3.403, 2.452, 3.307, 6.231, 13.69),
+  Two_LEDs   = c(22.04, 13.81, 7.242, 5.246, 6.674, 13.4,  21.39, 21.88)
+)
+
+# --- Reshape for fmsb (needs max row, min row, then data rows) ---
+# fmsb requires: row1 = max values, row2 = min values, then actual data
+radar_data <- fig3n |>
+  select(-Sector) |>
+  t() |>
+  as.data.frame()
+
+colnames(radar_data) <- fig3n$Sector
+
+# Add max and min rows required by fmsb
+radar_data <- rbind(
+  rep(25, 8),   # max
+  rep(0, 8),    # min
+  radar_data
+)
+
+rownames(radar_data) <- c("Max", "Min", "Single LED", "Two LEDs")
+
+# --- Colors (matching original: red for single, yellow for two) ---
+fill_colors  <- c(rgb(0.85, 0.3, 0.3, 0.3), rgb(0.95, 0.9, 0.3, 0.3))
+line_colors  <- c(rgb(0.85, 0.2, 0.2, 0.9), rgb(0.85, 0.75, 0.1, 0.9))
+
+# --- Plot ---
+par(mar = c(2, 2, 3, 2))  # margins
+
+radarchart(
+  radar_data,
+  axistype   = 1,                        # numeric axis labels
+  pcol       = line_colors,              # line colors
+  pfcol      = fill_colors,              # fill colors
+  plwd       = 2,                        # line width
+  plty       = c(2, 2),                  # dashed lines (matching original)
+  cglcol     = "grey80",                 # grid line color
+  cglty      = 1,                        # grid line type
+  cglwd      = 0.8,                      # grid line width
+  axislabcol = "grey40",                 # axis label color
+  vlcex      = 0.85,                     # variable label size
+  calcex     = 0.7,                      # axis calculation label size
+  caxislabels = c(0, 5, 10, 15, 20, 25), # axis tick labels
+  title      = expression(bold("Nerve sector mean irradiance (mW/mm"^2*")"))
+)
+
+# --- Legend ---
+legend(
+  x = "topright",
+  legend = c("Single µLED", "Two µLEDs"),
+  col    = line_colors,
+  lty    = 2,
+  lwd    = 2,
+  pch    = 15,                           # filled square legend symbols
+  pt.cex = 1.2,
+  bty    = "n",                          # no legend box
+  cex    = 0.85
+)
+```
+
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(fmsb)
+
+# --- Read in Fig.3n data (starts at row 49 in sheet "Fig.3") ---
+fig3n <- read_excel("/Users/hector/Desktop/data_replication_data.xlsx",
+                    sheet = "Fig.3",
+                    range = "A49:C57",    # row 49 = headers, rows 50-57 = data
+                    col_names = TRUE)
+
+# --- Peek at raw data ---
+head(fig3n)
+
+# --- Rename columns cleanly ---
+colnames(fig3n) <- c("Sector", "Single_LED", "Two_LEDs")
+
+# --- Reorder sectors so Sector3 is at top (matching original figure) ---
+sector_order <- c(3, 4, 5, 6, 7, 8, 1, 2)
+fig3n <- fig3n |>
+  mutate(Sector = paste0("Sector", Sector)) |>
+  slice(sector_order)
+
+# --- Reshape for fmsb (requires max row, min row, then data) ---
+radar_data <- fig3n |>
+  select(-Sector) |>
+  t() |>
+  as.data.frame()
+
+colnames(radar_data) <- fig3n$Sector
+
+radar_data <- rbind(
+  rep(25, 8),  # max
+  rep(0, 8),   # min
+  radar_data
+)
+
+rownames(radar_data) <- c("Max", "Min", "Single LED", "Two LEDs")
+
+# --- Colors ---
+fill_colors <- c(rgb(0.85, 0.3, 0.3, 0.3), rgb(0.95, 0.9, 0.3, 0.3))
+line_colors <- c(rgb(0.85, 0.2, 0.2, 0.9), rgb(0.85, 0.75, 0.1, 0.9))
+
+# --- Plot ---
+par(mar = c(2, 2, 3, 2))
+
+radarchart(
+  radar_data,
+  axistype    = 1,
+  pcol        = line_colors,
+  pfcol       = fill_colors,
+  plwd        = 2,
+  plty        = c(2, 2),
+  cglcol      = "grey80",
+  cglty       = 1,
+  cglwd       = 0.8,
+  axislabcol  = "grey40",
+  vlcex       = 0.85,
+  calcex      = 0.7,
+  caxislabels = c(0, 5, 10, 15, 20, 25),
+  title       = expression(bold("Nerve sector mean irradiance (mW/mm"^2*")"))
+)
+
+legend(
+  x      = "topright",
+  legend = c("Single µLED", "Two µLEDs"),
+  col    = line_colors,
+  lty    = 2,
+  lwd    = 2,
+  pch    = 15,
+  pt.cex = 1.2,
+  bty    = "n",
+  cex    = 0.85
+)
+```
+Descriptive Stats:Figure 3.n
+
+```{r}
+library(readxl)
+library(fmsb)
+
+# read data
+fig3n <- read_excel("/Users/hector/Desktop/data_replication_data.xlsx",
+                    sheet = "Fig.3",
+                    range = "A49:C57",
+                    col_names = TRUE)
+
+colnames(fig3n) <- c("Sector", "Single_LED", "Two_LEDs")
+
+# reshape for fmsb
+radar_data <- fig3n |>
+  select(-Sector) |>
+  t() |>
+  as.data.frame()
+
+colnames(radar_data) <- paste0("Sector", fig3n$Sector)
+
+radar_data <- rbind(
+  rep(25, 8),  # max
+  rep(0, 8),   # min
+  radar_data
+)
+
+# plot
+radarchart(radar_data)
+```
+Visualization: Figure 3e
+
+```{r}
+library(readxl)
+library(tidyverse)
+
+# read data
+fig3e <- read_excel("/Users/hector/Desktop/data_replication_data.xlsx",
+                    sheet = "Fig.3",
+                    range = "A2:M37",
+                    col_names = TRUE)
+
+# rename columns
+colnames(fig3e) <- c("time",
+                     "v3.3_1", "v3.3_2", "v3.3_3",
+                     "v3.6_1", "v3.6_2", "v3.6_3",
+                     "v3.9_1", "v3.9_2", "v3.9_3",
+                     "v4.2_1", "v4.2_2", "v4.2_3")
+
+# pivot to long format
+fig3e_long <- fig3e |>
+  pivot_longer(-time, names_to = "col", values_to = "temp") |>
+  mutate(voltage = str_extract(col, "v[0-9.]+"),
+         voltage = recode(voltage,
+                          "v3.3" = "3.3V",
+                          "v3.6" = "3.6V",
+                          "v3.9" = "3.9V",
+                          "v4.2" = "4.2V"))
+
+# calculate mean, min, max per voltage per timepoint
+fig3e_summary <- fig3e_long |>
+  group_by(time, voltage) |>
+  summarise(mean_temp = mean(temp, na.rm = TRUE),
+            min_temp  = min(temp,  na.rm = TRUE),
+            max_temp  = max(temp,  na.rm = TRUE),
+            .groups = "drop")
+
+# plot
+ggplot(fig3e_summary, aes(x = time, y = mean_temp, color = voltage, fill = voltage)) +
+  geom_ribbon(aes(ymin = min_temp, ymax = max_temp), alpha = 0.3, color = NA) +
+  geom_line() +
+  labs(x = "Time/s",
+       y = "Maximum temperature/°C",
+       title = "In Vitro Implant Temperature Curve",
+       color = NULL,
+       fill  = NULL)
+```
+
+
+Inferential Statistics: Figure 3e
+
+```{r}
+fig3e <- read_excel("/Users/hector/Desktop/data_replication_data.xlsx",
+                    sheet = "Fig.3",
+                    range = "A2:M37",
+                    col_names = TRUE)
+
+colnames(fig3e) <- c("time",
+                     "v3.3_1", "v3.3_2", "v3.3_3",
+                     "v3.6_1", "v3.6_2", "v3.6_3",
+                     "v3.9_1", "v3.9_2", "v3.9_3",
+                     "v4.2_1", "v4.2_2", "v4.2_3")
+
+# filter to long-term steady state only (t > 200s, matching paper's definition)
+fig3e_long <- fig3e |>
+  filter(time > 200) |>
+  pivot_longer(-time, names_to = "col", values_to = "temp") |>
+  mutate(voltage = str_extract(col, "v[0-9.]+"),
+         voltage = recode(voltage,
+                          "v3.3" = "3.3V",
+                          "v3.6" = "3.6V",
+                          "v3.9" = "3.9V",
+                          "v4.2" = "4.2V"))
+
+# descriptive summary (n=4 replicates per voltage, mean ± SEM, matching paper)
+fig3e_long |>
+  group_by(voltage) |>
+  summarise(
+    n    = n(),
+    mean = mean(temp, na.rm = TRUE),
+    sd   = sd(temp,   na.rm = TRUE),
+    sem  = sd / sqrt(n)
+  )
+
+# one-way ANOVA
+anova_result <- aov(temp ~ voltage, data = fig3e_long)
+summary(anova_result)
+
+# post-hoc Tukey HSD to see which voltages differ from each other
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+```
+
+###A one-way ANOVA revealed a significant effect of input voltage on steady-state implant temperature (p < 0.001). Post-hoc Tukey HSD testing confirmed that all four voltage conditions (3.3V, 3.6V, 3.9V, and 4.2V) produced significantly different mean temperatures from one another (all adjusted p < 0.001), with higher voltages consistently producing greater heating, replicating the pattern reported in the original study.
+
+
+Second analysis!!! Figure 3.p
+```{r}
+scale_factor <- 5
+
+ggplot() +
+  geom_col(data = ms_summary,
+           aes(x = factor(pulse_width), y = mean * scale_factor),
+           fill = "steelblue", width = 0.6) +
+  geom_errorbar(data = ms_summary,
+                aes(x = factor(pulse_width),
+                    ymin = (mean - sem) * scale_factor,
+                    ymax = (mean + sem) * scale_factor),
+                width = 0.2) +
+  geom_line(data = pct_summary,
+            aes(x = factor(pulse_width), y = mean, group = 1),
+            color = "red", linewidth = 1) +
+  geom_point(data = pct_summary,
+             aes(x = factor(pulse_width), y = mean),
+             color = "red", size = 2) +
+  geom_errorbar(data = pct_summary,
+                aes(x = factor(pulse_width),
+                    ymin = mean - sem,
+                    ymax = mean + sem),
+                color = "red", width = 0.2) +
+  scale_y_continuous(
+    name = "Time Deviation/%",
+    sec.axis = sec_axis(~ . / scale_factor, name = "Time Deviation/ms")
+  ) +
+  labs(x = "Pulse Width/ms",
+       title = "Stimulation Temporal Accuracy across Pulse Width")
+```
+
+
+
+
