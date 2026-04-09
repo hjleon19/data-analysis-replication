@@ -1,0 +1,433 @@
+---
+title: "Data_replication!"
+format: html
+Author: Hector!
+---
+
+## Introduction
+
+Peripheral nerve injuries can severely impair motor function, and while nerve transfer surgery offers a promising path to recovery, predicting individual outcomes remains a significant clinical challenge. Zhu et al. developed the Fully Implantable Multisite Optogenetic Stimulation System (FIMOSS), a wireless, reprogrammable device designed for long-term evaluation of peripheral nerve plexus function at sub-nerve resolution. Using transgenic Thy1-ChR2-EYFP mice, the system delivered targeted optical stimulation to individual nerve fascicles and recorded both electrophysiological and motor responses. The authors then applied FIMOSS to a nerve transfer mouse model following traumatic brain injury, tracking innervation patterns across multiple muscles over 12 weeks post-surgery. Their findings demonstrate that FIMOSS can provide refined, longitudinal assessment of nerve function, with potential applications in personalized diagnosis and treatment planning following nerve injuries or surgeries.
+\
+
+## Data and Reanalyses
+
+the data used here was pulled from the supplementary materials of the original paper - they gave raw numbers for several figures 🎉. this report focuses on fig 3, which covers thermal safety, optical output, and stimulation timing accuracy of the FIMOSS implant.
+
+the 4 analyses replicated here:
+
+1. **Visualization (Fig. 3e)** - line plot w/ shaded SEM ribbons, in vitro temp over 7200s at 4 voltages (n=3 per voltage)
+2. **Descriptive stats (Fig. 3g)** - mean ± SEM in vivo temp across 4 devices at 5 timepoints over 3600s
+3. **Inferential stats (Fig. 3e)** -one-way ANOVA + tukey HSD on steady-state temps across voltage conditions
+4. **Visualization (Fig. 3p)** — dual axis plot, temporal accuracy across pulse widths 10-200ms (n=4, mean ± SEM)
+
+## Variable Dictionary
+
+| variable | description |
+|---|---|
+| `time` | timepoint in seconds |
+| `temp` | temperature in °C |
+| `voltage` | input voltage condition (3.3V–4.2V) |
+| `device` | individual implant device (1–4) |
+| `pulse_width` | LED pulse width in ms |
+| `mean` | mean across replicates |
+| `sem` | standard error of the mean |
+| `delta` | temp change from baseline |
+| `pct_summary` | time deviation as % |
+| `ms_summary` | time deviation in ms |
+
+## loading packages & data 
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(fmsb)
+knitr::opts_chunk$set(fig.path = "images/")
+
+
+# download data file from GitHub to a temp path
+data_url  <- "https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/data_replication_data.xlsx"
+data_path <- tempfile(fileext = ".xlsx")
+download.file(data_url, destfile = data_path, mode = "wb")
+
+# main data file
+fig3_raw <- read_excel(data_path, sheet = "Fig.3")
+
+# peek at raw
+head(fig3_raw)
+```
+
+---
+
+**Original Figure 3 from Zhu et al.:**
+
+![](https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/fig3.webp){width=70% fig-align="center"}
+
+## Descriptive Statistics: Fig 3g
+
+
+![](https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/fig3g.png){width=70% fig-align="center"}
+
+###in vivo temp across 4 devices over time 
+###reading in the specific range for 3g, its buried in the sheet
+
+```{r}
+# read in fig3g - in vivo temp data
+fig3g <- read_excel(data_path,
+                    sheet = "Fig.3",
+                    range = "A41:E46",
+                    col_names = TRUE)
+
+# rename cols
+colnames(fig3g) <- c("time", "Device1", "Device2", "Device3", "Device4")
+
+# peek
+head(fig3g)
+```
+
+###pivot to long so we can group by device/time easily
+
+```{r}
+# long format
+fig3g_long <- fig3g |>
+  pivot_longer(-time, names_to = "device", values_to = "temp")
+
+head(fig3g_long)
+```
+
+###now get mean ± sem per timepoint across the 4 devices
+
+```{r}
+# descriptive stats per timepoint
+fig3g_summary <- fig3g_long |>
+  group_by(time) |>
+  summarise(
+    n    = n(),
+    mean = mean(temp),
+    sd   = sd(temp),
+    sem  = sd / sqrt(n),
+    min  = min(temp),
+    max  = max(temp),
+    .groups = "drop"
+  )
+
+# print the table so we can compare to paper
+knitr::kable(fig3g_summary, digits = 3,
+             caption = "mean ± SEM in vivo temp per timepoint (Fig 3g)")
+```
+
+###also calc delta from baseline per device - shows how much warming happened
+
+```{r}
+# temp change from t=0 per device
+fig3g_delta <- fig3g_long |>
+  group_by(device) |>
+  mutate(baseline = temp[time == 0],
+         delta    = temp - baseline) |>
+  ungroup()
+
+# summarise delta across devices
+delta_summary <- fig3g_delta |>
+  group_by(time) |>
+  summarise(
+    mean_delta = mean(delta),
+    sem_delta  = sd(delta) / sqrt(n()),
+    .groups = "drop"
+  )
+
+knitr::kable(delta_summary, digits = 3,
+             caption = "mean temp change from baseline per timepoint")
+```
+
+###plot - individual device points + dashed mean line w error bars, matches fig 3g style
+
+```{r}
+ggplot() +
+  geom_point(data = fig3g_long,
+             aes(x = time, y = temp, color = device), size = 3) +
+  geom_line(data = fig3g_summary,
+            aes(x = time, y = mean), linetype = "dashed", linewidth = 0.8) +
+  geom_errorbar(data = fig3g_summary,
+                aes(x = time, ymin = mean - sem, ymax = mean + sem),
+                width = 100) +
+  labs(x     = "Time/s",
+       y     = "Maximum temperature/°C",
+       title = "In Vivo Implant Temperature Curve",
+       color = NULL)
+```
+
+across the four implanted devices, mean in vivo temperature remained stable and close to baseline throughout the 3600s recording period, ranging from 33.4°C (± 0.03 SEM) at t=0 to a peak of 34.4°C (± 0.39 SEM) at t=1800s, consistent with the modest temperature increases shown in Figure 3g of the original study. mean temp increase from baseline peaked at t=1800s and t=2700s with an avg rise of 0.975°C (± 0.40 and ± 0.46 SEM respectively), and remained below 1°C across all timepoints, indicating that continuous FIMOSS operation at 3.3V produces only minimal subcutaneous heating in vivo 🌡️
+
+---
+
+## Visualization: Fig 3e
+
+
+
+![](https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/fig3e.png){width=70% fig-align="center"}
+
+###in vitro temp curves - 4 voltages, 3 replicates each, 7200s total
+###need to reshape from wide (one col per replicate) to long
+
+```{r}
+# read in fig3e
+fig3e <- read_excel(data_path,
+                    sheet = "Fig.3",
+                    range = "A2:M37",
+                    col_names = TRUE)
+
+# rename - 3 reps per voltage condition
+colnames(fig3e) <- c("time",
+                     "v3.3_1", "v3.3_2", "v3.3_3",
+                     "v3.6_1", "v3.6_2", "v3.6_3",
+                     "v3.9_1", "v3.9_2", "v3.9_3",
+                     "v4.2_1", "v4.2_2", "v4.2_3")
+
+head(fig3e)
+```
+
+###pivot long + extract voltage label from col name
+
+```{r}
+# long format + voltage label
+fig3e_long <- fig3e |>
+  pivot_longer(-time, names_to = "col", values_to = "temp") |>
+  mutate(voltage = str_extract(col, "v[0-9.]+"),
+         voltage = recode(voltage,
+                          "v3.3" = "3.3V",
+                          "v3.6" = "3.6V",
+                          "v3.9" = "3.9V",
+                          "v4.2" = "4.2V"))
+
+head(fig3e_long)
+```
+
+###summarise - mean + min/max for ribbon
+
+```{r}
+# mean, min, max per voltage per timepoint
+fig3e_summary <- fig3e_long |>
+  group_by(time, voltage) |>
+  summarise(mean_temp = mean(temp, na.rm = TRUE),
+            min_temp  = min(temp,  na.rm = TRUE),
+            max_temp  = max(temp,  na.rm = TRUE),
+            sem_temp  = sd(temp, na.rm = TRUE) / sqrt(n()),
+            .groups = "drop")
+
+knitr::kable(head(fig3e_summary, 12), digits = 3,
+             caption = "sample of fig3e summary - mean temp per voltage per timepoint")
+```
+
+###plot - ribbon = min/max range, line = mean. matches fig 3e layout
+
+```{r}
+ggplot(fig3e_summary,
+       aes(x = time, y = mean_temp, color = voltage, fill = voltage)) +
+  geom_ribbon(aes(ymin = min_temp, ymax = max_temp),
+              alpha = 0.3, color = NA) +
+  geom_line() +
+  labs(x     = "Time/s",
+       y     = "Maximum temperature/°C",
+       title = "In Vitro Implant Temperature Curve",
+       color = NULL,
+       fill  = NULL)
+```
+
+---
+
+## Inferential Statistics: Fig 3e 📊
+
+###anova to test if steady state temps differ across voltages
+###paper defines long term as t > 200s so filtering to that
+
+```{r}
+# filter to steady state (long term phase only)
+fig3e_steady <- fig3e_long |>
+  filter(time > 200)
+
+# descriptive summary per voltage first
+steady_desc <- fig3e_steady |>
+  group_by(voltage) |>
+  summarise(
+    n    = n(),
+    mean = mean(temp, na.rm = TRUE),
+    sd   = sd(temp,   na.rm = TRUE),
+    sem  = sd / sqrt(n),
+    .groups = "drop"
+  )
+
+knitr::kable(steady_desc, digits = 3,
+             caption = "steady state temp summary per voltage (t > 200s)")
+```
+
+###one way anova is voltage a sig predictor of temp?
+
+```{r}
+#anova
+anova_result <- aov(temp ~ voltage, data = fig3e_steady)
+summary(anova_result)
+```
+
+###tukey post hoc which pairs are diff from each other
+
+```{r}
+#tukey HSD
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+```
+
+a one-way ANOVA revealed a significant effect of input voltage on steady-state implant temperature (p < 0.001). post-hoc Tukey HSD testing confirmed that all four voltage conditions (3.3V, 3.6V, 3.9V, and 4.2V) produced significantly different mean temperatures from one another (all adjusted p < 0.001), with higher voltages consistently producing greater heating, replicating the pattern reported in the original study.
+
+---
+
+## Second Visualization: Fig 3p
+
+![](https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/fig3p.png){width=70% fig-align="center"}
+
+###dual axis plot - bars = ms deviation, line = % deviation
+###two separate tables in the sheet so need to read both
+
+```{r}
+# read pct deviation table
+fig3p_pct <- read_excel(data_path,
+                        sheet = "Fig.3",
+                        range = "A89:G92",
+                        col_names = TRUE)
+
+# read ms deviation table
+fig3p_ms <- read_excel(data_path,
+                       sheet = "Fig.3",
+                       range = "A96:G100",
+                       col_names = TRUE)
+
+# rename both
+colnames(fig3p_pct) <- c("rep", "pw10", "pw20", "pw30", "pw40", "pw50", "pw200")
+colnames(fig3p_ms)  <- c("rep", "pw10", "pw20", "pw30", "pw40", "pw50", "pw200")
+
+# peek
+head(fig3p_pct)
+head(fig3p_ms)
+```
+
+###pivot + summarise both tables - same function works for both
+
+```{r}
+# summarise helper func
+summarise_fig3p <- function(df, measure_name) {
+  df |>
+    pivot_longer(-rep, names_to = "pulse_width", values_to = "value") |>
+    mutate(pulse_width = as.numeric(str_remove(pulse_width, "pw"))) |>
+    group_by(pulse_width) |>
+    summarise(mean = mean(value),
+              sem  = sd(value) / sqrt(n()),
+              .groups = "drop") |>
+    mutate(measure = measure_name)
+}
+
+pct_summary <- summarise_fig3p(fig3p_pct, "pct")
+ms_summary  <- summarise_fig3p(fig3p_ms,  "ms")
+
+# print both summary tables for comparison to paper
+knitr::kable(pct_summary, digits = 4,
+             caption = "time deviation % summary per pulse width")
+knitr::kable(ms_summary,  digits = 4,
+             caption = "time deviation ms summary per pulse width")
+```
+
+###dual axis plot - scale factor maps ms onto pct axis
+###scale_factor = 5 bc pct goes to ~1.5 and ms goes to ~0.30
+
+```{r}
+scale_factor <- 5
+
+ggplot() +
+  # bars = ms (scaled up to sit on pct axis)
+  geom_col(data = ms_summary,
+           aes(x = factor(pulse_width), y = mean * scale_factor),
+           fill = "steelblue", width = 0.6) +
+  geom_errorbar(data = ms_summary,
+                aes(x = factor(pulse_width),
+                    ymin = (mean - sem) * scale_factor,
+                    ymax = (mean + sem) * scale_factor),
+                width = 0.2) +
+  # line = pct deviation
+  geom_line(data = pct_summary,
+            aes(x = factor(pulse_width), y = mean, group = 1),
+            color = "red", linewidth = 1) +
+  geom_point(data = pct_summary,
+             aes(x = factor(pulse_width), y = mean),
+             color = "red", size = 2) +
+  geom_errorbar(data = pct_summary,
+                aes(x = factor(pulse_width),
+                    ymin = mean - sem,
+                    ymax = mean + sem),
+                color = "red", width = 0.2) +
+  # dual axis - right axis divides back by scale factor to show real ms vals
+  scale_y_continuous(
+    name = "Time Deviation/%",
+    sec.axis = sec_axis(~ . / scale_factor, name = "Time Deviation/ms")
+  ) +
+  labs(x     = "Pulse Width/ms",
+       title = "Stimulation Temporal Accuracy across Pulse Width")
+```
+
+## Discussion and Reflection
+
+overall the replications went pretty well — all four analyses match the patterns reported in 
+the original paper. the temperature curves, descriptive stats, ANOVA results, and temporal 
+accuracy plot all line up with what Zhu et al. reported, both numerically and visually.
+
+the main differences are cosmetic. the authors clearly used something like GraphPad Prism 
+which gives you a lot of point-and-click styling options that are tedious to recreate in 
+ggplot2, like the broken x-axis in Fig. 3e to highlight the short-term rise phase, 
+specific color choices, and panel annotations. none of that affects the actual results though.
+
+the one thing i attempted but was not able to figure out using any online resources was Fig. 3n the radar chart showing mean irradiance across nerve sectors 
+for single vs. two µLED conditions. getting the `fmsb` radar chart to cooperate with the 
+scaling, sector labels, and dual-condition overlay was a crazy, and the attempt below 
+is.. not great. a proper replication would probably need a custom polar coordinate approach 
+in ggplot2 or just doing it in the original software. everything else replicated cleanly 
+though, so overall a dub.
+
+
+![](https://raw.githubusercontent.com/hjleon19/data-analysis-replication/main/fig3n.png){width=50% fig-align="center"}
+
+## Attempted Replication: Fig 3n
+
+```{r}
+# read in fig3n - light irradiance per nerve sector, single vs two LEDs
+fig3n <- read_excel(data_path,
+                    sheet = "Fig.3",
+                    range = "A49:C57",
+                    col_names = TRUE)
+
+colnames(fig3n) <- c("sector", "single_uled", "two_uled")
+
+# close the polygon by repeating row 1 at the end
+fig3n_closed <- bind_rows(fig3n, fig3n[1, ])
+
+# pivot long for ggplot
+fig3n_long <- fig3n_closed |>
+  pivot_longer(-sector, names_to = "condition", values_to = "irradiance") |>
+  mutate(
+    condition = recode(condition,
+                       "single_uled" = "Single µLED",
+                       "two_uled"    = "Two µLEDs"),
+    sector = factor(sector, levels = fig3n$sector)  # <- just this, no c() duplication
+  )
+ggplot(fig3n_long, aes(x = sector, y = irradiance,
+                        color = condition, fill = condition, group = condition)) +
+  geom_polygon(alpha = 0.3, linewidth = 0.8) +
+  geom_point(size = 2) +
+  coord_polar(start = 0) +
+  scale_y_continuous(limits = c(0, 25), breaks = c(0, 5, 10, 15, 20, 25)) +
+  scale_color_manual(values = c("Single µLED" = "#4CAF50", "Two µLEDs" = "#FFC107")) +
+  scale_fill_manual(values  = c("Single µLED" = "#4CAF50", "Two µLEDs" = "#FFC107")) +
+  labs(title = "Nerve sector mean irradiance (mW/mm^2)",
+       x = NULL, y = NULL, color = NULL, fill = NULL) +
+  theme_minimal() +
+  theme(axis.text.x    = element_text(size = 9),
+        axis.text.y    = element_text(size = 7),
+        legend.position = "bottom",
+        panel.grid.major = element_line(color = "grey80"))
+```
+
